@@ -172,6 +172,52 @@ class Menu:
                                 pygame.quit()
                                 sys.exit()
 
+    def draw_ai_settings_menu(self):
+        """
+        Draw the AI settings menu, allowing player to choose who goes first.
+        """
+        self.win.blit(self.background_image, (0, 0))  # Draw the background image
+
+        # Draw title
+        title_font = pygame.font.SysFont(None, 42)
+        title_text = "Choose Your Color"
+        title_surface = title_font.render(title_text, True, BLACK_COLOR)
+        title_rect = title_surface.get_rect(center=(WIDTH // 2, HEIGHT // 4))
+        self.win.blit(title_surface, title_rect)
+
+        # Draw explanation text
+        explanation_font = pygame.font.SysFont(None, 24)
+        explanation_text = "Black goes first, White goes second."
+        explanation_surface = explanation_font.render(explanation_text, True, BLACK_COLOR)
+        explanation_rect = explanation_surface.get_rect(center=(WIDTH // 2, HEIGHT // 4 + 40))
+        self.win.blit(explanation_surface, explanation_rect)
+
+        buttons = []
+        
+        # Create buttons for color selection
+        play_as_black = Button(
+            WIDTH // 2, HEIGHT // 2 - 50, 200, 40, 
+            "Play as Black (First)", self.menu_font
+        )
+        
+        play_as_white = Button(
+            WIDTH // 2, HEIGHT // 2 + 30, 200, 40, 
+            "Play as White (Second)", self.menu_font
+        )
+        
+        back_button = Button(
+            WIDTH // 2, HEIGHT // 2 + 110, 200, 40, 
+            "Back", self.menu_font
+        )
+        
+        buttons = [play_as_black, play_as_white, back_button]
+        
+        for button in buttons:
+            button.draw(self.win)
+
+        pygame.display.update()
+        self.handle_ai_settings_input(buttons)
+
     def handle_input_submenu(self, buttons):
         """
         Handle input events for the submenu.
@@ -197,22 +243,97 @@ class Menu:
                                 )
 
                             elif button.text == "Single-player\n(Play with AI)":
-                                othello_gui = OthelloGUI(player_mode="ai")
-                                # Pass the draw_menu function as a callback to return to the main menu
-                                othello_gui.run_game(
-                                    return_to_menu_callback=self.draw_menu
-                                )
+                                # 修改：不直接創建遊戲，而是先顯示 AI 設定選單
+                                self.draw_ai_settings_menu()
 
                             elif button.text == "Return to Main Menu":
                                 self.draw_menu()  # Go back to the main menu
 
-    def run_single_player_game(self):
+    def handle_ai_settings_input(self, buttons):
         """
-        Start a single-player game with AI.
+        Handle input events for the AI settings menu.
+        
+        Parameters:
+            buttons (list): The list of buttons in the AI settings menu.
         """
-        # Pass "ai" as the player_mode to indicate the single-player mode with AI
-        othello_gui = OthelloGUI(player_mode="ai")
-        othello_gui.run_game()
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    x, y = event.pos
+                    for button in buttons:
+                        if button.check_collision((x, y)):
+                            if button.text == "Play as Black (First)":
+                                # Player is black (first)
+                                othello_gui = OthelloGUI(player_mode="ai", player_color=1)
+                                othello_gui.run_game(return_to_menu_callback=self.draw_menu)
+                            elif button.text == "Play as White (Second)":
+                                # Player is white (second)
+                                othello_gui = OthelloGUI(player_mode="ai", player_color=-1)
+                                othello_gui.run_game(return_to_menu_callback=self.draw_menu)
+                            elif button.text == "Back":
+                                self.draw_submenu()  # Go back to the submenu
+
+    def draw_credit(self):
+        """
+        Draw the credit screen on the Pygame window.
+        """
+        self.win.blit(self.background_image, (0, 0))  # Draw the background image
+
+        credit_text = "Written and Developed by AmirHossein Roodaki"
+        github_link = "GitHub: /Roodaki"
+        return_button_text = "Return to Main Menu"
+
+        credit_font = pygame.font.SysFont(None, 24)
+        github_font = pygame.font.SysFont(None, 20)
+        return_button_font = pygame.font.SysFont(None, 30)
+
+        credit_surface = credit_font.render(credit_text, True, BLACK_COLOR)
+        github_surface = github_font.render(github_link, True, BLACK_COLOR)
+
+        credit_rect = credit_surface.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 40))
+        github_rect = github_surface.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+
+        self.return_button = Button(
+            WIDTH // 2,
+            HEIGHT // 2 + 40,
+            200,
+            40,
+            return_button_text,
+            return_button_font,
+            self.draw_menu,
+        )
+        self.return_button.draw(self.win)
+
+        # Wrap and render the credit text if it exceeds the window width
+        credit_lines = []
+        words = credit_text.split()
+        current_line = ""
+        for word in words:
+            if (
+                credit_font.size(current_line + word)[0] > WIDTH - 40
+            ):  # 40 is the padding
+                credit_lines.append(current_line)
+                current_line = word + " "
+            else:
+                current_line += word + " "
+        credit_lines.append(current_line)
+
+        # Display the credit text line by line
+        for i, line in enumerate(credit_lines):
+            line_surface = credit_font.render(line, True, BLACK_COLOR)
+            line_rect = line_surface.get_rect(
+                center=(WIDTH // 2, HEIGHT // 2 - 40 + i * 30)
+            )
+            self.win.blit(line_surface, line_rect)
+
+        self.win.blit(github_surface, github_rect)
+
+        pygame.display.update()
+        self.handle_input_credit()
 
     def handle_input_credit(self):
         """

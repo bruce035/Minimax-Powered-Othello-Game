@@ -1,22 +1,26 @@
 class OthelloGame:
-    def __init__(self, player_mode="friend"):
+    def __init__(self, player_mode="friend", player_color=1):
         """
         A class representing the Othello game board and its rules.
 
         Args:
             player_mode (str): The mode of the game, either "friend" or "ai" (default is "friend").
+            player_color (int): The color of the human player when playing against AI, 1 for black (first), -1 for white (second).
         """
         self.board = [[0 for _ in range(8)] for _ in range(8)]
         self.board[3][3] = 1
         self.board[3][4] = -1
         self.board[4][3] = -1
         self.board[4][4] = 1
-        self.current_player = 1
+        self.current_player = 1  # Black always goes first in the game rules
         self.player_mode = player_mode
+        self.player_color = player_color  # Store which color the human player is
         # 新增變數，記錄是否處於還棋模式
         self.give_back_mode = False
         # 新增變數，記錄最近一次被翻轉的棋子位置
         self.flipped_positions = []
+        # 新增變數，記錄連續跳過回合的次數
+        self.consecutive_passes = 0
 
     def is_valid_move(self, row, col):
         """
@@ -222,6 +226,33 @@ class OthelloGame:
         """
         return self.flipped_positions
 
+    def has_valid_moves(self):
+        """
+        Check if the current player has any valid moves.
+        
+        Returns:
+            bool: True if the current player has at least one valid move, False otherwise.
+        """
+        return len(self.get_valid_moves()) > 0
+
+    def pass_turn(self):
+        """
+        Pass the turn to the opponent when no valid moves are available.
+        
+        Returns:
+            bool: True if the turn was passed, False if there are valid moves.
+        """
+        # 如果處於還棋模式或有有效移動，不能跳過回合
+        if self.give_back_mode or self.has_valid_moves():
+            return False
+            
+        # 增加連續跳過回合計數
+        self.consecutive_passes += 1
+        
+        # 切換玩家
+        self.current_player *= -1
+        return True
+
     def is_game_over(self):
         """
         Check if the game is over (no more valid moves or board is full).
@@ -233,9 +264,23 @@ class OthelloGame:
         if self.give_back_mode:
             return False
             
-        return not self.get_valid_moves() or all(
-            all(cell != 0 for cell in row) for row in self.board
-        )
+        # 如果連續兩次跳過回合，遊戲結束
+        if self.consecutive_passes >= 2:
+            return True
+            
+        # 如果棋盤已滿，遊戲結束
+        if all(all(cell != 0 for cell in row) for row in self.board):
+            return True
+            
+        # 檢查是否雙方都沒有有效移動
+        current_has_moves = self.has_valid_moves()
+        
+        # 臨時切換玩家檢查對手是否有有效移動
+        self.current_player *= -1
+        opponent_has_moves = self.has_valid_moves()
+        self.current_player *= -1  # 切換回來
+        
+        return not (current_has_moves or opponent_has_moves)
 
     def get_winner(self):
         """

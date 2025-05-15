@@ -1,30 +1,43 @@
 from othello_game import OthelloGame
+import time
+import random
 
+# 全域暫存表，用於儲存已評估的局面
+position_cache = {}
 
-def get_best_move(game, max_depth=8):
+def get_best_move(game, max_depth=8):  # 減少預設搜尋深度從8到4
     """
-    Given the current game state, this function returns the best move for the AI player using the Alpha-Beta Pruning
-    algorithm with a specified maximum search depth.
+    Given the current game state, returns the best move using Alpha-Beta Pruning.
 
     Parameters:
         game (OthelloGame): The current game state.
-        max_depth (int): The maximum search depth for the Alpha-Beta algorithm.
+        max_depth (int): The maximum search depth (default reduced to 4).
 
     Returns:
-        tuple: The corresponding move (row, col), or position to give back if in give_back_mode.
+        tuple: The best move (row, col), or position to give back.
     """
-    # 如果是還棋模式，選擇最佳的還棋策略
-    if game.is_in_give_back_mode():
-        return get_best_give_back(game)
+    # 計算空位數量來動態調整搜尋深度
+    empty_count = sum(row.count(0) for row in game.board)
     
-    # 否則正常使用 minimax 尋找最佳移動
-    _, best_move = alphabeta(game, max_depth)
+    # 根據空位數量調整深度
+    if empty_count <= 10:
+        max_depth = 6  # 接近終盤，增加深度
+    elif empty_count >= 50:
+        max_depth = 4  # 開局階段，減少深度
+    
+    # 如果是還棋模式，用更簡單的策略選擇還棋
+    if game.is_in_give_back_mode():
+        return optimized_give_back(game)
+    
+    # 設置搜尋的開始時間，用於超時控制
+    start_time = time.time()
+    _, best_move = alphabeta(game, max_depth, True, float("-inf"), float("inf"), start_time)
     return best_move
 
 
-def get_best_give_back(game):
+def optimized_give_back(game):
     """
-    Choose the best disk to give back to the opponent.
+    Optimized function to choose a disk to return.
     
     Parameters:
         game (OthelloGame): The current game state.
@@ -33,200 +46,317 @@ def get_best_give_back(game):
         tuple: The position (row, col) of the disk to give back.
     """
     give_back_options = game.get_give_back_options()
-    best_score = float('-inf')
-    best_position = give_back_options[0]  # 預設值
     
-    # 評估每個可歸還的位置
-    for row, col in give_back_options:
-        # 創建遊戲副本
-        new_game = OthelloGame(player_mode=game.player_mode)
-        new_game.board = [row[:] for row in game.board]
-        new_game.current_player = game.current_player
-        new_game.give_back_mode = True
-        new_game.flipped_positions = game.flipped_positions.copy()
-        
-        # 嘗試歸還這個位置
-        new_game.give_back_disk(row, col)
-        
-        # 評估歸還後的遊戲狀態
-        score = evaluate_game_state(new_game)
-        if score > best_score:
-            best_score = score
-            best_position = (row, col)
+    # 優先還角落和邊緣的棋子，這通常是對對手最有利的位置
+    corners = [(0, 0), (0, 7), (7, 0), (7, 7)]
+    edges = [(i, j) for i in [0, 7] for j in range(8)] + [(i, j) for i in range(8) for j in [0, 7]]
     
-    return best_position
+    # 檢查是否可以還角落
+    for pos in give_back_options:
+        if pos in corners:
+            return pos
+    
+    # 檢查是否可以還邊緣
+    edge_options = [pos for pos in give_back_options if pos in edges]
+    if edge_options:
+        return edge_options[0]
+    
+    # 否則還中間區域的棋子
+    return give_back_options[0]
 
 
 def alphabeta(
-    game, max_depth, maximizing_player=True, alpha=float("-inf"), beta=float("inf")
+    game, max_depth, maximizing_player, alpha, beta, start_time, time_limit=50.0
 ):
     """
-    Alpha-Beta Pruning algorithm for selecting the best move for the AI player.
-    
-    Parameters:
-        game (OthelloGame): The current game state.
-        max_depth (int): The maximum search depth for the Alpha-Beta algorithm.
-        maximizing_player (bool): True if maximizing player (AI), False if minimizing player (opponent).
-        alpha (float): The alpha value for pruning. Defaults to negative infinity.
-        beta (float): The beta value for pruning. Defaults to positive infinity.
-
-    Returns:
-        tuple: A tuple containing the evaluation value of the best move and the corresponding move (row, col).
+    Optimized Alpha-Beta Pruning algorithm.
     """
+    # 超時檢查
+    if time.time() - start_time > time_limit:
+        return quick_evaluate(game), None
+    
+    # 終止條件
     if max_depth == 0 or game.is_game_over():
         return evaluate_game_state(game), None
+    
+    # 使用暫存表增加效率
+    board_hash = hash(str(game.board))
+    cache_key = (board_hash, max_depth, maximizing_player)
+    if cache_key in position_cache:
+        return position_cache[cache_key]
 
     valid_moves = game.get_valid_moves()
-
+    
+    # 如果沒有有效移動，模擬跳過回合
+    if not valid_moves:
+        # 建立遊戲副本
+        new_game = OthelloGame(player_mode=game.player_mode)
+        new_game.board = [row[:] for row in game.board]
+        new_game.current_player = game.current_player
+        
+        # 跳過回合
+        new_game.current_player *= -1
+        
+        # 遞迴搜索 (注意反轉 maximizing_player)
+        eval_val, _ = alphabeta(new_game, max_depth - 1, not maximizing_player, alpha, beta, start_time)
+        return eval_val, None
+    
+    # 移動排序：優先考慮角落和邊緣的移動
+    valid_moves = sort_moves(valid_moves, game)
+    
     if maximizing_player:
         max_eval = float("-inf")
-        best_move = None
-
+        best_move = None if valid_moves else None
+        
         for move in valid_moves:
-            new_game = OthelloGame(player_mode=game.player_mode)
-            new_game.board = [row[:] for row in game.board]
-            new_game.current_player = game.current_player
+            # 建立新遊戲狀態 (不使用整個 OthelloGame 物件複製)
+            new_board = [row[:] for row in game.board]
+            new_player = game.current_player
             
-            # 嘗試下子
-            move_result = new_game.make_move(*move)
+            # 模擬移動
+            is_valid, flipped = simulate_move(new_board, move[0], move[1], new_player)
+            if not is_valid:
+                continue
+                
+            # 如果需要還棋，使用簡化版還棋策略
+            needs_give_back = len(flipped) >= 2
+            if needs_give_back:
+                give_back_pos = simple_give_back(new_board, flipped)
+                new_board[give_back_pos[0]][give_back_pos[1]] = -new_player
             
-            # 如果需要還棋，選擇最佳還棋策略
-            if move_result and new_game.is_in_give_back_mode():
-                best_give_back = get_best_give_back(new_game)
-                new_game.give_back_disk(*best_give_back)
+            # 切換玩家
+            new_player = -new_player
             
-            eval, _ = alphabeta(new_game, max_depth - 1, False, alpha, beta)
-
-            if eval > max_eval:
-                max_eval = eval
+            # 創建臨時遊戲狀態用於評估
+            temp_game = OthelloGame(player_mode=game.player_mode)
+            temp_game.board = new_board
+            temp_game.current_player = new_player
+            
+            eval_val, _ = alphabeta(temp_game, max_depth - 1, False, alpha, beta, start_time)
+            
+            if eval_val > max_eval:
+                max_eval = eval_val
                 best_move = move
-
-            alpha = max(alpha, eval)
+                
+            alpha = max(alpha, eval_val)
             if beta <= alpha:
                 break
-
-        return max_eval, best_move
+                
+        result = (max_eval, best_move)
+        position_cache[cache_key] = result
+        return result
     else:
         min_eval = float("inf")
-        best_move = None
-
+        best_move = None if valid_moves else None
+        
         for move in valid_moves:
-            new_game = OthelloGame(player_mode=game.player_mode)
-            new_game.board = [row[:] for row in game.board]
-            new_game.current_player = game.current_player
+            # 建立新遊戲狀態
+            new_board = [row[:] for row in game.board]
+            new_player = game.current_player
             
-            # 嘗試下子
-            move_result = new_game.make_move(*move)
+            # 模擬移動
+            is_valid, flipped = simulate_move(new_board, move[0], move[1], new_player)
+            if not is_valid:
+                continue
+                
+            # 如果需要還棋，使用簡化版還棋策略
+            needs_give_back = len(flipped) >= 2
+            if needs_give_back:
+                give_back_pos = simple_give_back(new_board, flipped)
+                new_board[give_back_pos[0]][give_back_pos[1]] = -new_player
             
-            # 如果需要還棋，選擇最佳還棋策略
-            if move_result and new_game.is_in_give_back_mode():
-                best_give_back = get_best_give_back(new_game)
-                new_game.give_back_disk(*best_give_back)
+            # 切換玩家
+            new_player = -new_player
             
-            eval, _ = alphabeta(new_game, max_depth - 1, True, alpha, beta)
-
-            if eval < min_eval:
-                min_eval = eval
+            # 創建臨時遊戲狀態用於評估
+            temp_game = OthelloGame(player_mode=game.player_mode)
+            temp_game.board = new_board
+            temp_game.current_player = new_player
+            
+            eval_val, _ = alphabeta(temp_game, max_depth - 1, True, alpha, beta, start_time)
+            
+            if eval_val < min_eval:
+                min_eval = eval_val
                 best_move = move
-
-            beta = min(beta, eval)
+                
+            beta = min(beta, eval_val)
             if beta <= alpha:
                 break
+                
+        result = (min_eval, best_move)
+        position_cache[cache_key] = result
+        return result
 
-        return min_eval, best_move
+
+def sort_moves(moves, game):
+    """
+    Sort moves by priority (corners first, then edges, then others).
+    """
+    corners = [(0, 0), (0, 7), (7, 0), (7, 7)]
+    edges = [(i, j) for i in [0, 7] for j in range(1, 7)] + [(i, j) for i in range(1, 7) for j in [0, 7]]
+    
+    corner_moves = []
+    edge_moves = []
+    other_moves = []
+    
+    for move in moves:
+        if move in corners:
+            corner_moves.append(move)
+        elif move in edges:
+            edge_moves.append(move)
+        else:
+            other_moves.append(move)
+            
+    # 對每個類別內部進行隨機排序以增加變化性
+    random.shuffle(corner_moves)
+    random.shuffle(edge_moves)
+    random.shuffle(other_moves)
+    
+    return corner_moves + edge_moves + other_moves
+
+
+def simulate_move(board, row, col, player):
+    """
+    Simulate a move without creating a new game object.
+    
+    Returns:
+        tuple: (success, flipped_positions)
+    """
+    if board[row][col] != 0:
+        return False, []
+        
+    flipped = []
+    directions = [(-1, -1), (-1, 0), (-1, 1), (0, -1), 
+                  (0, 1), (1, -1), (1, 0), (1, 1)]
+                  
+    for dr, dc in directions:
+        r, c = row + dr, col + dc
+        flip_list = []
+        
+        while 0 <= r < 8 and 0 <= c < 8 and board[r][c] == -player:
+            flip_list.append((r, c))
+            r += dr
+            c += dc
+            
+            if 0 <= r < 8 and 0 <= c < 8 and board[r][c] == player:
+                flipped.extend(flip_list)
+                for fr, fc in flip_list:
+                    board[fr][fc] = player
+    
+    if flipped:  # 如果有翻轉，表示這是有效移動
+        board[row][col] = player
+        return True, flipped
+    return False, []
+
+
+def simple_give_back(board, flipped_positions):
+    """
+    Simple strategy to give back a disk.
+    """
+    corners = [(0, 0), (0, 7), (7, 0), (7, 7)]
+    edges = [(i, j) for i in [0, 7] for j in range(1, 7)] + [(i, j) for i in range(1, 7) for j in [0, 7]]
+    
+    # 優先還角落
+    for pos in flipped_positions:
+        if pos in corners:
+            return pos
+            
+    # 其次還邊緣
+    for pos in flipped_positions:
+        if pos in edges:
+            return pos
+            
+    # 隨機還一個位置
+    return flipped_positions[0]
+
+
+def quick_evaluate(game):
+    """
+    A simplified and faster evaluation function for when time is limited.
+    """
+    # 快速計算棋子差異
+    player_disks = sum(row.count(game.current_player) for row in game.board)
+    opponent_disks = sum(row.count(-game.current_player) for row in game.board)
+    
+    # 計算角落占有
+    corners = [(0, 0), (0, 7), (7, 0), (7, 7)]
+    player_corners = sum(1 for r, c in corners if game.board[r][c] == game.current_player)
+    opponent_corners = sum(1 for r, c in corners if game.board[r][c] == -game.current_player)
+    
+    # 簡單的評分計算
+    score = (player_disks - opponent_disks) + 10 * (player_corners - opponent_corners)
+    return score
 
 
 def evaluate_game_state(game):
     """
-    Evaluates the current game state for the AI player.
-
-    Parameters:
-        game (OthelloGame): The current game state.
-
-    Returns:
-        float: The evaluation value representing the desirability of the game state for the AI player.
+    Optimized evaluation function.
     """
-    # Evaluation weights for different factors
-    coin_parity_weight = 1.0
-    mobility_weight = 2.0
-    corner_occupancy_weight = 5.0
-    stability_weight = 3.0
-    edge_occupancy_weight = 2.5
-
-    # Coin parity (difference in disk count)
-    player_disk_count = sum(row.count(game.current_player) for row in game.board)
-    opponent_disk_count = sum(row.count(-game.current_player) for row in game.board)
-    coin_parity = player_disk_count - opponent_disk_count
-
-    # Mobility (number of valid moves for the current player)
-    player_valid_moves = len(game.get_valid_moves())
-    opponent_valid_moves = len(
-        OthelloGame(player_mode=-game.current_player).get_valid_moves()
-    )
-    mobility = player_valid_moves - opponent_valid_moves
-
-    # Corner occupancy (number of player disks in the corners)
-    corner_occupancy = sum(
-        game.board[i][j] for i, j in [(0, 0), (0, 7), (7, 0), (7, 7)]
-    )
-
-    # Stability (number of stable disks)
-    stability = calculate_stability(game)
-
-    # Edge occupancy (number of player disks on the edges)
-    edge_occupancy = sum(game.board[i][j] for i in [0, 7] for j in range(1, 7)) + sum(
-        game.board[i][j] for i in range(1, 7) for j in [0, 7]
-    )
-
-    # Combine the factors with the corresponding weights to get the final evaluation value
-    evaluation = (
-        coin_parity * coin_parity_weight
-        + mobility * mobility_weight
-        + corner_occupancy * corner_occupancy_weight
-        + stability * stability_weight
-        + edge_occupancy * edge_occupancy_weight
-    )
-
-    return evaluation
+    # 遊戲結束時，直接評估贏/輸
+    if game.is_game_over():
+        winner = game.get_winner()
+        if winner == game.current_player:
+            return 10000  # 勝利
+        elif winner == -game.current_player:
+            return -10000  # 失敗
+        return 0  # 平局
+    
+    # 初始階段評估(前20步)，著重於移動性和角落控制
+    total_disks = sum(row.count(1) + row.count(-1) for row in game.board)
+    if total_disks < 20:
+        return early_game_evaluation(game)
+    # 中期階段，全面評估
+    elif total_disks < 50:
+        return mid_game_evaluation(game)
+    # 後期階段，著重於棋子數量
+    else:
+        return late_game_evaluation(game)
 
 
-def calculate_stability(game):
+def early_game_evaluation(game):
     """
-    Calculates the stability of the AI player's disks on the board.
-
-    Parameters:
-        game (OthelloGame): The current game state.
-
-    Returns:
-        int: The number of stable disks for the AI player.
+    Early game evaluation focusing on mobility and corner control.
     """
-
-    def neighbors(row, col):
-        return [
-            (row + dr, col + dc)
-            for dr in [-1, 0, 1]
-            for dc in [-1, 0, 1]
-            if (dr, dc) != (0, 0) and 0 <= row + dr < 8 and 0 <= col + dc < 8
-        ]
-
+    # 移動性評估
+    player_moves = len(game.get_valid_moves())
+    
+    # 角落控制
     corners = [(0, 0), (0, 7), (7, 0), (7, 7)]
-    edges = [(i, j) for i in [0, 7] for j in range(1, 7)] + [
-        (i, j) for i in range(1, 7) for j in [0, 7]
-    ]
-    inner_region = [(i, j) for i in range(2, 6) for j in range(2, 6)]
-    regions = [corners, edges, inner_region]
+    player_corners = sum(1 for r, c in corners if game.board[r][c] == game.current_player)
+    opponent_corners = sum(1 for r, c in corners if game.board[r][c] == -game.current_player)
+    
+    # 結合評分
+    return player_moves * 2 + (player_corners - opponent_corners) * 25
 
-    stable_count = 0
 
-    def is_stable_disk(row, col):
-        return (
-            all(game.board[r][c] == game.current_player for r, c in neighbors(row, col))
-            or (row, col) in edges + corners
-        )
+def mid_game_evaluation(game):
+    """
+    Mid-game evaluation with balanced factors.
+    """
+    # 棋子數量差異
+    player_disks = sum(row.count(game.current_player) for row in game.board)
+    opponent_disks = sum(row.count(-game.current_player) for row in game.board)
+    disk_diff = player_disks - opponent_disks
+    
+    # 角落控制
+    corners = [(0, 0), (0, 7), (7, 0), (7, 7)]
+    player_corners = sum(1 for r, c in corners if game.board[r][c] == game.current_player)
+    opponent_corners = sum(1 for r, c in corners if game.board[r][c] == -game.current_player)
+    corner_diff = player_corners - opponent_corners
+    
+    # 移動性
+    player_moves = len(game.get_valid_moves())
+    
+    # 結合評分
+    return disk_diff + corner_diff * 25 + player_moves * 2
 
-    for region in regions:
-        for row, col in region:
-            if game.board[row][col] == game.current_player and is_stable_disk(row, col):
-                stable_count += 1
 
-    return stable_count
+def late_game_evaluation(game):
+    """
+    Late game evaluation focusing on disk count.
+    """
+    # 後期主要考慮棋子數量
+    player_disks = sum(row.count(game.current_player) for row in game.board)
+    opponent_disks = sum(row.count(-game.current_player) for row in game.board)
+    
+    return player_disks - opponent_disks
