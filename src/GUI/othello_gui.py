@@ -10,6 +10,7 @@ SQUARE_SIZE = (HEIGHT - 80) // BOARD_SIZE
 BLACK_COLOR = (0, 0, 0)
 WHITE_COLOR = (255, 255, 255)
 GREEN_COLOR = (0, 128, 0)
+HIGHLIGHT_COLOR = (255, 255, 0)  # Used to highlight disks that can be returned
 
 
 class OthelloGUI:
@@ -47,6 +48,11 @@ class OthelloGUI:
         """
         self.win.fill(GREEN_COLOR)
 
+        # Get positions of disks that can be returned
+        give_back_options = []
+        if self.game.is_in_give_back_mode():
+            give_back_options = self.game.get_give_back_options()
+
         # Draw board grid and disks
         for row in range(BOARD_SIZE):
             for col in range(BOARD_SIZE):
@@ -56,6 +62,8 @@ class OthelloGUI:
                     (col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE),
                     1,
                 )
+                
+                # Draw disks
                 if self.game.board[row][col] == 1:
                     pygame.draw.circle(
                         self.win,
@@ -63,6 +71,15 @@ class OthelloGUI:
                         ((col + 0.5) * SQUARE_SIZE, (row + 0.5) * SQUARE_SIZE),
                         SQUARE_SIZE // 2 - 4,
                     )
+                    # Highlight disk if it can be returned
+                    if (row, col) in give_back_options:
+                        pygame.draw.circle(
+                            self.win,
+                            HIGHLIGHT_COLOR,
+                            ((col + 0.5) * SQUARE_SIZE, (row + 0.5) * SQUARE_SIZE),
+                            SQUARE_SIZE // 2 - 4,
+                            3,  # Border width
+                        )
                 elif self.game.board[row][col] == -1:
                     pygame.draw.circle(
                         self.win,
@@ -70,6 +87,15 @@ class OthelloGUI:
                         ((col + 0.5) * SQUARE_SIZE, (row + 0.5) * SQUARE_SIZE),
                         SQUARE_SIZE // 2 - 4,
                     )
+                    # Highlight disk if it can be returned
+                    if (row, col) in give_back_options:
+                        pygame.draw.circle(
+                            self.win,
+                            HIGHLIGHT_COLOR,
+                            ((col + 0.5) * SQUARE_SIZE, (row + 0.5) * SQUARE_SIZE),
+                            SQUARE_SIZE // 2 - 4,
+                            3,  # Border width
+                        )
 
         # Draw messaging area
         message_area_rect = pygame.Rect(
@@ -77,20 +103,24 @@ class OthelloGUI:
         )
         pygame.draw.rect(self.win, WHITE_COLOR, message_area_rect)
 
-        # Draw player's turn message
-        player_turn = "Black's" if self.game.current_player == 1 else "White's"
-        turn_message = f"{player_turn} turn"
+        # Display appropriate message based on game state
+        if self.game.is_in_give_back_mode():
+            player_turn = "Black" if self.game.current_player == 1 else "White"
+            turn_message = f"{player_turn} needs to select a disk to return"
+        else:
+            player_turn = "Black's" if self.game.current_player == 1 else "White's"
+            turn_message = f"{player_turn} turn"
+            
         message_surface = self.message_font.render(turn_message, True, BLACK_COLOR)
         message_rect = message_surface.get_rect(
             center=(WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 - 20)
         )
         self.win.blit(message_surface, message_rect)
 
-        # Draw invalid move message
+        # Draw custom message
         if self.message:
-            invalid_move_message = self.message
             message_surface = self.message_font.render(
-                invalid_move_message, True, BLACK_COLOR
+                self.message, True, BLACK_COLOR
             )
             message_rect = message_surface.get_rect(
                 center=(WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 + 20)
@@ -122,15 +152,33 @@ class OthelloGUI:
                 x, y = event.pos
                 col = x // SQUARE_SIZE
                 row = y // SQUARE_SIZE
-                if self.game.is_valid_move(row, col):
-                    self.game.make_move(row, col)
-                    self.invalid_move_message = (
-                        ""  # Clear any previous invalid move message
-                    )
-                    self.flip_sound.play()  # Play flip sound effect
+                
+                # Check if in "return disk" mode
+                if self.game.is_in_give_back_mode():
+                    # Try to return a disk
+                    if 0 <= row < BOARD_SIZE and 0 <= col < BOARD_SIZE:
+                        if self.game.give_back_disk(row, col):
+                            self.message = "A disk has been returned to opponent"
+                            self.invalid_move_message = ""
+                            self.flip_sound.play()
+                        else:
+                            self.invalid_move_message = "Please select a highlighted disk to return"
+                            self.invalid_play_sound.play()
                 else:
-                    self.invalid_move_message = "Invalid move! Try again."
-                    self.invalid_play_sound.play()  # Play invalid play sound effect
+                    # Normal move
+                    if self.game.is_valid_move(row, col):
+                        move_result = self.game.make_move(row, col)
+                        
+                        if move_result and self.game.is_in_give_back_mode():
+                            self.message = "Flipped two or more disks, please select one to return"
+                        else:
+                            self.message = ""
+                            
+                        self.invalid_move_message = ""
+                        self.flip_sound.play()
+                    else:
+                        self.invalid_move_message = "Invalid move! Please try again."
+                        self.invalid_play_sound.play()
 
     def run_game(self, return_to_menu_callback=None):
         """
@@ -139,30 +187,61 @@ class OthelloGUI:
         while not self.game.is_game_over():
             self.handle_input()
 
-            # If it's the AI player's turn
+            # If it's AI's turn
             if self.game.player_mode == "ai" and self.game.current_player == -1:
-                self.message = "AI is thinking..."
-                self.draw_board()  # Display the thinking message
-                ai_move = get_best_move(self.game)
-                pygame.time.delay(500)  # Wait for a short time to show the message
-                self.game.make_move(*ai_move)
-
-            self.message = ""  # Clear any previous messages
+                # If in "return disk" mode, let AI choose a disk to return
+                if self.game.is_in_give_back_mode():
+                    self.message = "AI is choosing a disk to return..."
+                    self.draw_board()
+                    pygame.time.delay(500)  # Brief delay to show thinking message
+                    
+                    # Get AI's decision for returning a disk
+                    ai_give_back = get_best_move(self.game)
+                    self.game.give_back_disk(*ai_give_back)
+                    
+                    self.message = "AI has returned a disk"
+                    self.draw_board()
+                    pygame.time.delay(500)
+                else:
+                    # Normal AI move
+                    self.message = "AI is thinking..."
+                    self.draw_board()
+                    
+                    # Get AI's move decision
+                    ai_move = get_best_move(self.game)
+                    pygame.time.delay(500)
+                    move_result = self.game.make_move(*ai_move)
+                    
+                    # If AI needs to return a disk
+                    if move_result and self.game.is_in_give_back_mode():
+                        self.message = "AI flipped two or more disks, choosing one to return..."
+                        self.draw_board()
+                        pygame.time.delay(500)
+                        
+                        # Get AI's decision for returning a disk
+                        ai_give_back = get_best_move(self.game)
+                        self.game.give_back_disk(*ai_give_back)
+                        
+                        self.message = "AI has returned a disk"
+                        self.draw_board()
+                        pygame.time.delay(500)
+            
             self.draw_board()
 
+        # Game over, display result
         winner = self.game.get_winner()
         if winner == 1:
             self.message = "Black wins!"
         elif winner == -1:
             self.message = "White wins!"
         else:
-            self.message = "It's a tie!"
+            self.message = "Draw!"
 
         self.draw_board()
-        self.end_game_sound.play()  # Play end game sound effect
-        pygame.time.delay(3000)  # Display the result for 2 seconds before returning
+        self.end_game_sound.play()
+        pygame.time.delay(3000)
 
-        # Call the return_to_menu_callback if provided
+        # If a return to menu callback is provided, call it
         if return_to_menu_callback:
             return_to_menu_callback()
 

@@ -13,6 +13,10 @@ class OthelloGame:
         self.board[4][4] = 1
         self.current_player = 1
         self.player_mode = player_mode
+        # 新增變數，記錄是否處於還棋模式
+        self.give_back_mode = False
+        # 新增變數，記錄最近一次被翻轉的棋子位置
+        self.flipped_positions = []
 
     def is_valid_move(self, row, col):
         """
@@ -25,6 +29,10 @@ class OthelloGame:
         Returns:
             bool: True if the move is valid and flips opponent disks, False otherwise.
         """
+        # 如果處於還棋模式，則無法下新棋
+        if self.give_back_mode:
+            return False
+            
         if self.board[row][col] != 0:
             return False
 
@@ -55,6 +63,48 @@ class OthelloGame:
 
         return False
 
+    def get_flippable_disks(self, row, col):
+        """
+        Get a list of positions where disks would be flipped for a move.
+        
+        Args:
+            row (int): The row index of the move.
+            col (int): The column index of the move.
+            
+        Returns:
+            list: A list of positions (row, col) where disks would be flipped.
+        """
+        flippable = []
+        directions = [
+            (-1, -1),
+            (-1, 0),
+            (-1, 1),
+            (0, -1),
+            (0, 1),
+            (1, -1),
+            (1, 0),
+            (1, 1),
+        ]
+        
+        for dr, dc in directions:
+            r, c = row + dr, col + dc
+            flip_list = []
+            while (
+                0 <= r < 8 and 0 <= c < 8 and self.board[r][c] == -self.current_player
+            ):
+                flip_list.append((r, c))
+                r += dr
+                c += dc
+                if (
+                    0 <= r < 8
+                    and 0 <= c < 8
+                    and self.board[r][c] == self.current_player
+                ):
+                    flippable.extend(flip_list)
+                    break
+        
+        return flippable
+
     def flip_disks(self, row, col):
         """
         Flip the opponent's disks after placing a disk at the given position.
@@ -62,7 +112,11 @@ class OthelloGame:
         Args:
             row (int): The row index of the move.
             col (int): The column index of the move.
+            
+        Returns:
+            list: A list of positions where disks were flipped.
         """
+        flipped = []
         directions = [
             (-1, -1),
             (-1, 0),
@@ -89,6 +143,10 @@ class OthelloGame:
                 ):
                     for fr, fc in flip_list:
                         self.board[fr][fc] = self.current_player
+                        flipped.append((fr, fc))
+                    break
+                    
+        return flipped
 
     def make_move(self, row, col):
         """
@@ -97,11 +155,72 @@ class OthelloGame:
         Args:
             row (int): The row index of the move.
             col (int): The column index of the move.
+            
+        Returns:
+            bool: True if move was successful, False otherwise.
         """
+        # 如果處於還棋模式，則不能再下新棋
+        if self.give_back_mode:
+            return False
+            
         if self.is_valid_move(row, col):
             self.board[row][col] = self.current_player
-            self.flip_disks(row, col)
+            self.flipped_positions = self.flip_disks(row, col)
+            
+            # 如果翻轉了兩枚或以上棋子，進入還棋模式
+            if len(self.flipped_positions) >= 2:
+                self.give_back_mode = True
+                return True
+            else:
+                # 少於兩枚則不需還棋，直接切換玩家
+                self.current_player *= -1
+                return True
+                
+        return False
+
+    def give_back_disk(self, row, col):
+        """
+        Give back a disk to the opponent from the recently flipped disks.
+        
+        Args:
+            row (int): The row index of the disk to give back.
+            col (int): The column index of the disk to give back.
+            
+        Returns:
+            bool: True if the disk was successfully given back, False otherwise.
+        """
+        # 檢查是否處於還棋模式且選擇的位置是可還棋的位置
+        if self.give_back_mode and (row, col) in self.flipped_positions:
+            # 將棋子還給對手
+            self.board[row][col] = -self.current_player
+            
+            # 結束還棋模式
+            self.give_back_mode = False
+            self.flipped_positions = []
+            
+            # 切換玩家
             self.current_player *= -1
+            return True
+            
+        return False
+
+    def is_in_give_back_mode(self):
+        """
+        Check if the game is currently in give-back mode.
+        
+        Returns:
+            bool: True if in give-back mode, False otherwise.
+        """
+        return self.give_back_mode
+
+    def get_give_back_options(self):
+        """
+        Get a list of positions where a disk can be given back.
+        
+        Returns:
+            list: A list of positions (row, col) that can be given back.
+        """
+        return self.flipped_positions
 
     def is_game_over(self):
         """
@@ -110,6 +229,10 @@ class OthelloGame:
         Returns:
             bool: True if the game is over, False otherwise.
         """
+        # 如果處於還棋模式，遊戲未結束
+        if self.give_back_mode:
+            return False
+            
         return not self.get_valid_moves() or all(
             all(cell != 0 for cell in row) for row in self.board
         )
@@ -138,6 +261,10 @@ class OthelloGame:
         Returns:
             list: A list of valid moves represented as tuples (row, col).
         """
+        # 如果處於還棋模式，沒有有效移動
+        if self.give_back_mode:
+            return []
+            
         valid_moves = []
         for row in range(8):
             for col in range(8):

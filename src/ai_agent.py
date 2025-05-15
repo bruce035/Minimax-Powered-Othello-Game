@@ -11,10 +11,50 @@ def get_best_move(game, max_depth=8):
         max_depth (int): The maximum search depth for the Alpha-Beta algorithm.
 
     Returns:
-        tuple: A tuple containing the evaluation value of the best move and the corresponding move (row, col).
+        tuple: The corresponding move (row, col), or position to give back if in give_back_mode.
     """
+    # 如果是還棋模式，選擇最佳的還棋策略
+    if game.is_in_give_back_mode():
+        return get_best_give_back(game)
+    
+    # 否則正常使用 minimax 尋找最佳移動
     _, best_move = alphabeta(game, max_depth)
     return best_move
+
+
+def get_best_give_back(game):
+    """
+    Choose the best disk to give back to the opponent.
+    
+    Parameters:
+        game (OthelloGame): The current game state.
+        
+    Returns:
+        tuple: The position (row, col) of the disk to give back.
+    """
+    give_back_options = game.get_give_back_options()
+    best_score = float('-inf')
+    best_position = give_back_options[0]  # 預設值
+    
+    # 評估每個可歸還的位置
+    for row, col in give_back_options:
+        # 創建遊戲副本
+        new_game = OthelloGame(player_mode=game.player_mode)
+        new_game.board = [row[:] for row in game.board]
+        new_game.current_player = game.current_player
+        new_game.give_back_mode = True
+        new_game.flipped_positions = game.flipped_positions.copy()
+        
+        # 嘗試歸還這個位置
+        new_game.give_back_disk(row, col)
+        
+        # 評估歸還後的遊戲狀態
+        score = evaluate_game_state(new_game)
+        if score > best_score:
+            best_score = score
+            best_position = (row, col)
+    
+    return best_position
 
 
 def alphabeta(
@@ -22,7 +62,7 @@ def alphabeta(
 ):
     """
     Alpha-Beta Pruning algorithm for selecting the best move for the AI player.
-
+    
     Parameters:
         game (OthelloGame): The current game state.
         max_depth (int): The maximum search depth for the Alpha-Beta algorithm.
@@ -46,8 +86,15 @@ def alphabeta(
             new_game = OthelloGame(player_mode=game.player_mode)
             new_game.board = [row[:] for row in game.board]
             new_game.current_player = game.current_player
-            new_game.make_move(*move)
-
+            
+            # 嘗試下子
+            move_result = new_game.make_move(*move)
+            
+            # 如果需要還棋，選擇最佳還棋策略
+            if move_result and new_game.is_in_give_back_mode():
+                best_give_back = get_best_give_back(new_game)
+                new_game.give_back_disk(*best_give_back)
+            
             eval, _ = alphabeta(new_game, max_depth - 1, False, alpha, beta)
 
             if eval > max_eval:
@@ -67,8 +114,15 @@ def alphabeta(
             new_game = OthelloGame(player_mode=game.player_mode)
             new_game.board = [row[:] for row in game.board]
             new_game.current_player = game.current_player
-            new_game.make_move(*move)
-
+            
+            # 嘗試下子
+            move_result = new_game.make_move(*move)
+            
+            # 如果需要還棋，選擇最佳還棋策略
+            if move_result and new_game.is_in_give_back_mode():
+                best_give_back = get_best_give_back(new_game)
+                new_game.give_back_disk(*best_give_back)
+            
             eval, _ = alphabeta(new_game, max_depth - 1, True, alpha, beta)
 
             if eval < min_eval:
