@@ -265,7 +265,7 @@ class OthelloGame:
             return False
             
         # 如果連續兩次跳過回合，遊戲結束
-        if self.consecutive_passes >= 2:
+        if self.consecutive_passes >= 10:
             return True
             
         # 如果棋盤已滿，遊戲結束
