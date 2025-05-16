@@ -21,6 +21,11 @@ class OthelloGame:
         self.flipped_positions = []
         # 新增變數，記錄連續跳過回合的次數
         self.consecutive_passes = 0
+        # 新增變數，記錄遊戲歷史
+        self.move_history = []
+        # 新增變數，記錄最後一步動作
+        self.last_move = None
+        self.last_give_back = None
 
     def is_valid_move(self, row, col):
         """
@@ -168,6 +173,17 @@ class OthelloGame:
             return False
             
         if self.is_valid_move(row, col):
+            player_color = "BLACK" if self.current_player == 1 else "WHITE"
+            position = f"{chr(65 + row)}{col + 1}"  # 轉換為如A1, B2的格式
+            
+            # 記錄這一步的動作
+            self.last_move = (row, col)
+            self.last_give_back = None
+            
+            # 記錄到遊戲歷史
+            move_record = f"{player_color}: {position}"
+            self.move_history.append(move_record)
+            
             self.board[row][col] = self.current_player
             self.flipped_positions = self.flip_disks(row, col)
             
@@ -195,6 +211,16 @@ class OthelloGame:
         """
         # 檢查是否處於還棋模式且選擇的位置是可還棋的位置
         if self.give_back_mode and (row, col) in self.flipped_positions:
+            player_color = "BLACK" if self.current_player == 1 else "WHITE"
+            position = f"{chr(65 + row)}{col + 1}"  # 轉換為如A1, B2的格式
+            
+            # 紀錄返還的位置
+            self.last_give_back = (row, col)
+            
+            # 記錄到遊戲歷史
+            give_back_record = f"{player_color}: gave back at {position}"
+            self.move_history.append(give_back_record)
+            
             # 將棋子還給對手
             self.board[row][col] = -self.current_player
             
@@ -246,6 +272,16 @@ class OthelloGame:
         if self.give_back_mode or self.has_valid_moves():
             return False
             
+        player_color = "BLACK" if self.current_player == 1 else "WHITE"
+        
+        # 記錄跳過回合到遊戲歷史
+        pass_record = f"{player_color}: pass turn"
+        self.move_history.append(pass_record)
+        
+        # 記錄這一步為跳過
+        self.last_move = "pass"
+        self.last_give_back = None
+        
         # 增加連續跳過回合計數
         self.consecutive_passes += 1
         
@@ -316,3 +352,12 @@ class OthelloGame:
                 if self.is_valid_move(row, col):
                     valid_moves.append((row, col))
         return valid_moves
+
+    def get_move_history(self):
+        """
+        Get the complete move history of the game.
+        
+        Returns:
+            list: A list of strings describing all moves in the game.
+        """
+        return self.move_history

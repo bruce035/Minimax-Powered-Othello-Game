@@ -4,14 +4,16 @@ from othello_game import OthelloGame
 from ai_agent import get_best_move
 
 # Constants and colors
-WIDTH, HEIGHT = 480, 560
+WIDTH, HEIGHT = 680, 560  # 增加寬度，為記錄文字框留空間
 BOARD_SIZE = 8
 SQUARE_SIZE = (HEIGHT - 80) // BOARD_SIZE
+BOARD_WIDTH = SQUARE_SIZE * BOARD_SIZE
 BLACK_COLOR = (0, 0, 0)
 WHITE_COLOR = (255, 255, 255)
 GREEN_COLOR = (0, 128, 0)
-HIGHLIGHT_COLOR = (100, 200, 100)  # Color for highlighting valid moves
-HINT_COLOR = (255, 255, 0, 100)  # Semi-transparent yellow for hints
+HIGHLIGHT_COLOR = (100, 200, 100)
+HINT_COLOR = (255, 255, 0, 100)
+HISTORY_BG_COLOR = (240, 240, 240)  # 記錄區背景色
 
 
 class OthelloGUI:
@@ -25,16 +27,17 @@ class OthelloGUI:
         """
         self.win = self.initialize_pygame()
         self.game = OthelloGame(player_mode=player_mode, player_color=player_color)
-        # 調整字體大小，使用較小的字體 (從24改為20)
         self.message_font = pygame.font.SysFont(None, 20)
-        self.title_font = pygame.font.SysFont(None, 24)  # 較大的字體用於標題
+        self.title_font = pygame.font.SysFont(None, 24)
+        self.history_font = pygame.font.SysFont(None, 18)  # 歷史記錄使用較小字體
         self.message = ""
         self.invalid_move_message = ""
         self.flip_sound = pygame.mixer.Sound("./utils/sounds/disk_flip.mp3")
         self.end_game_sound = pygame.mixer.Sound("./utils/sounds/end_game.mp3")
         self.invalid_play_sound = pygame.mixer.Sound("./utils/sounds/invalid_play.mp3")
-        self.show_hints = True  # Option to show valid moves
-        self.player_color = player_color  # Store player's color choice
+        self.show_hints = True
+        self.player_color = player_color
+        self.history_scroll_position = 0  # 記錄區捲動位置
 
     def initialize_pygame(self):
         """
@@ -50,7 +53,7 @@ class OthelloGUI:
 
     def draw_board(self):
         """
-        Draw the Othello game board and messaging area on the window.
+        Draw the Othello game board, messaging area and move history panel.
         """
         self.win.fill(GREEN_COLOR)
 
@@ -78,11 +81,20 @@ class OthelloGUI:
                         SQUARE_SIZE // 2 - 4,
                     )
 
+        # 標記上一步的下棋位置
+        if self.game.last_move and self.game.last_move != "pass":
+            last_row, last_col = self.game.last_move
+            pygame.draw.rect(
+                self.win,
+                (255, 0, 0),  # 紅色標記
+                (last_col * SQUARE_SIZE, last_row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE),
+                2,
+            )
+
         # Highlight valid moves if hints are enabled
         if self.show_hints:
             valid_moves = self.game.get_valid_moves()
             for row, col in valid_moves:
-                # Create a semi-transparent surface for the hint
                 hint_surface = pygame.Surface((SQUARE_SIZE - 2, SQUARE_SIZE - 2), pygame.SRCALPHA)
                 pygame.draw.circle(
                     hint_surface,
@@ -105,17 +117,50 @@ class OthelloGUI:
 
         # Draw messaging area with more space
         message_area_rect = pygame.Rect(
-            0, BOARD_SIZE * SQUARE_SIZE, WIDTH, HEIGHT - (BOARD_SIZE * SQUARE_SIZE)
+            0, BOARD_SIZE * SQUARE_SIZE, BOARD_WIDTH, HEIGHT - (BOARD_SIZE * SQUARE_SIZE)
         )
         pygame.draw.rect(self.win, WHITE_COLOR, message_area_rect)
 
-        # Draw status area - 使用較大字體
+        # Draw move history panel (right side)
+        history_panel_rect = pygame.Rect(
+            BOARD_WIDTH, 0, WIDTH - BOARD_WIDTH, HEIGHT
+        )
+        pygame.draw.rect(self.win, HISTORY_BG_COLOR, history_panel_rect)
+        pygame.draw.line(self.win, BLACK_COLOR, (BOARD_WIDTH, 0), (BOARD_WIDTH, HEIGHT), 2)
+
+        # Draw history panel title
+        history_title = "MOVE HISTORY"
+        title_surface = self.title_font.render(history_title, True, BLACK_COLOR)
+        self.win.blit(title_surface, (BOARD_WIDTH + 10, 10))
+        pygame.draw.line(self.win, BLACK_COLOR, (BOARD_WIDTH, 35), (WIDTH, 35), 1)
+
+        # Draw move history records
+        move_history = self.game.get_move_history()
+        visible_height = HEIGHT - 45  # 45 is for the title area
+        line_height = 20
+        max_visible_lines = visible_height // line_height
+        
+        # Calculate scroll limits
+        max_scroll = max(0, len(move_history) - max_visible_lines)
+        self.history_scroll_position = min(self.history_scroll_position, max_scroll)
+        self.history_scroll_position = max(0, self.history_scroll_position)
+        
+        # Display visible history items
+        for i, record in enumerate(move_history[self.history_scroll_position:]):
+            if i >= max_visible_lines:
+                break
+                
+            y_pos = 45 + i * line_height
+            record_surface = self.history_font.render(f"{i+self.history_scroll_position+1}. {record}", True, BLACK_COLOR)
+            self.win.blit(record_surface, (BOARD_WIDTH + 10, y_pos))
+
+        # Draw status area in the message box
         black_count = sum(row.count(1) for row in self.game.board)
         white_count = sum(row.count(-1) for row in self.game.board)
         score_text = f"BLACK: {black_count}  |  WHITE: {white_count}"
         score_surface = self.title_font.render(score_text, True, BLACK_COLOR)
         score_rect = score_surface.get_rect(
-            center=(WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 - 35)
+            center=(BOARD_WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 - 35)
         )
         self.win.blit(score_surface, score_rect)
 
@@ -124,54 +169,39 @@ class OthelloGUI:
         turn_message = f"{player_turn} TURN"
         message_surface = self.title_font.render(turn_message, True, BLACK_COLOR)
         message_rect = message_surface.get_rect(
-            center=(WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 - 15)
+            center=(BOARD_WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 - 15)
         )
         self.win.blit(message_surface, message_rect)
 
-        # 顯示操作提示時分割成兩行，避免太長
+        # 顯示操作提示
         if self.show_hints:
-            hint_text1 = "Press H to toggle hints"
-            hint_surface1 = self.message_font.render(hint_text1, True, BLACK_COLOR)
-            hint_rect1 = hint_surface1.get_rect(
-                center=(WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 + 30)
+            hint_text = "Press H to toggle hints | Arrow keys to scroll"
+            hint_surface = self.message_font.render(hint_text, True, BLACK_COLOR)
+            hint_rect = hint_surface.get_rect(
+                center=(BOARD_WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 + 30)
             )
-            self.win.blit(hint_surface1, hint_rect1)
+            self.win.blit(hint_surface, hint_rect)
         else:
-            hint_text1 = "Press H to show hints"
-            hint_surface1 = self.message_font.render(hint_text1, True, BLACK_COLOR)
-            hint_rect1 = hint_surface1.get_rect(
-                center=(WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 + 30)
+            hint_text = "Press H to show hints | Arrow keys to scroll"
+            hint_surface = self.message_font.render(hint_text, True, BLACK_COLOR)
+            hint_rect = hint_surface.get_rect(
+                center=(BOARD_WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 + 30)
             )
-            self.win.blit(hint_surface1, hint_rect1)
+            self.win.blit(hint_surface, hint_rect)
 
         # Draw main message
         if self.message:
-            # 如果消息太長，分割顯示
-            if len(self.message) > 30 and " - " in self.message:
-                parts = self.message.split(" - ")
-                message_surface1 = self.message_font.render(parts[0], True, BLACK_COLOR)
-                message_rect1 = message_surface1.get_rect(
-                    center=(WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 + 5)
-                )
-                self.win.blit(message_surface1, message_rect1)
-                
-                message_surface2 = self.message_font.render(parts[1], True, BLACK_COLOR)
-                message_rect2 = message_surface2.get_rect(
-                    center=(WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 + 20)
-                )
-                self.win.blit(message_surface2, message_rect2)
-            else:
-                message_surface = self.message_font.render(self.message, True, BLACK_COLOR)
-                message_rect = message_surface.get_rect(
-                    center=(WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 + 10)
-                )
-                self.win.blit(message_surface, message_rect)
+            message_surface = self.message_font.render(self.message, True, BLACK_COLOR)
+            message_rect = message_surface.get_rect(
+                center=(BOARD_WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 + 10)
+            )
+            self.win.blit(message_surface, message_rect)
 
         # Draw invalid move message
         if self.invalid_move_message:
             message_surface = self.message_font.render(self.invalid_move_message, True, BLACK_COLOR)
             message_rect = message_surface.get_rect(
-                center=(WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 + 10)
+                center=(BOARD_WIDTH // 2, (HEIGHT + BOARD_SIZE * SQUARE_SIZE) // 2 + 10)
             )
             self.win.blit(message_surface, message_rect)
 
@@ -179,7 +209,7 @@ class OthelloGUI:
 
     def handle_input(self):
         """
-        Handle user input events such as mouse clicks and game quitting.
+        Handle user input events such as mouse clicks and keyboard inputs.
         """
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -190,31 +220,53 @@ class OthelloGUI:
                 if event.key == pygame.K_h:  # Toggle hints on/off
                     self.show_hints = not self.show_hints
                     self.draw_board()
-
+                elif event.key == pygame.K_UP:  # 向上捲動歷史記錄
+                    self.history_scroll_position = max(0, self.history_scroll_position - 1)
+                    self.draw_board()
+                elif event.key == pygame.K_DOWN:  # 向下捲動歷史記錄
+                    self.history_scroll_position += 1
+                    self.draw_board()
+                elif event.key == pygame.K_PAGEUP:  # 快速向上捲動
+                    self.history_scroll_position = max(0, self.history_scroll_position - 10)
+                    self.draw_board()
+                elif event.key == pygame.K_PAGEDOWN:  # 快速向下捲動
+                    self.history_scroll_position += 10
+                    self.draw_board()
+                    
             if event.type == pygame.MOUSEBUTTONDOWN:
                 x, y = event.pos
-                col = x // SQUARE_SIZE
-                row = y // SQUARE_SIZE
-                
-                # Check if we're clicking on the board
-                if 0 <= row < 8 and 0 <= col < 8:
-                    if self.game.is_in_give_back_mode():
-                        # If in give back mode, try to give back a disk
-                        if self.game.give_back_disk(row, col):
-                            self.flip_sound.play()
-                            self.invalid_move_message = ""
-                        else:
-                            self.invalid_move_message = "Invalid selection. Choose a highlighted disk."
-                            self.invalid_play_sound.play()
-                    else:
-                        # Normal move
-                        if self.game.is_valid_move(row, col):
-                            self.game.make_move(row, col)
-                            self.invalid_move_message = ""
-                            self.flip_sound.play()  # Play flip sound effect
-                        else:
-                            self.invalid_move_message = "Invalid move! Try again."
-                            self.invalid_play_sound.play()  # Play invalid play sound effect
+                # 檢測滑鼠滾輪事件用於捲動歷史記錄
+                if event.button == 4:  # 滾輪向上
+                    self.history_scroll_position = max(0, self.history_scroll_position - 3)
+                    self.draw_board()
+                elif event.button == 5:  # 滾輪向下
+                    self.history_scroll_position += 3
+                    self.draw_board()
+                else:  # 正常滑鼠點擊
+                    # 只檢查棋盤區域的點擊
+                    if x < BOARD_WIDTH:
+                        col = x // SQUARE_SIZE
+                        row = y // SQUARE_SIZE
+                        
+                        # Check if we're clicking on the board
+                        if 0 <= row < 8 and 0 <= col < 8:
+                            if self.game.is_in_give_back_mode():
+                                # If in give back mode, try to give back a disk
+                                if self.game.give_back_disk(row, col):
+                                    self.flip_sound.play()
+                                    self.invalid_move_message = ""
+                                else:
+                                    self.invalid_move_message = "Invalid selection. Choose a highlighted disk."
+                                    self.invalid_play_sound.play()
+                            else:
+                                # Normal move
+                                if self.game.is_valid_move(row, col):
+                                    self.game.make_move(row, col)
+                                    self.invalid_move_message = ""
+                                    self.flip_sound.play()
+                                else:
+                                    self.invalid_move_message = "Invalid move! Try again."
+                                    self.invalid_play_sound.play()
 
     def run_game(self, return_to_menu_callback=None):
         """
@@ -234,7 +286,8 @@ class OthelloGUI:
                 self.draw_board()
                 pygame.time.delay(500)
                 give_back_options = self.game.get_give_back_options()
-                self.game.give_back_disk(*give_back_options[0])
+                give_back_pos = get_best_move(self.game)  # 使用 AI 選擇最佳的還棋位置
+                self.game.give_back_disk(*give_back_pos)
             
             self.message = ""
 
@@ -244,10 +297,10 @@ class OthelloGUI:
                 player_name = "Black" if self.game.current_player == 1 else "White"
                 self.message = f"{player_name} has no valid moves. Pass turn."
                 self.draw_board()
-                pygame.time.delay(1000)  # 顯示訊息一段時間
+                pygame.time.delay(1000)
                 self.game.pass_turn()
-                continue  # 跳過其餘部分，重新檢查遊戲狀態
-                
+                continue
+            
             self.handle_input()
 
             # If it's the AI player's turn
@@ -265,13 +318,26 @@ class OthelloGUI:
                     pygame.time.delay(500)
                     self.game.make_move(*ai_move)
                     
+                    # 自動捲動歷史記錄到最新項目
+                    move_history = self.game.get_move_history()
+                    visible_height = HEIGHT - 45
+                    line_height = 20
+                    max_visible_lines = visible_height // line_height
+                    if len(move_history) > max_visible_lines:
+                        self.history_scroll_position = len(move_history) - max_visible_lines
+                
                     # If in give-back mode after AI move, automatically give back
                     if self.game.is_in_give_back_mode():
                         self.message = "AI is giving back a disk..."
                         self.draw_board()
                         pygame.time.delay(500)
-                        give_back_options = self.game.get_give_back_options()
-                        self.game.give_back_disk(*give_back_options[0])
+                        give_back_pos = get_best_move(self.game)
+                        self.game.give_back_disk(*give_back_pos)
+                        
+                        # 再次更新歷史記錄捲動位置
+                        move_history = self.game.get_move_history()
+                        if len(move_history) > max_visible_lines:
+                            self.history_scroll_position = len(move_history) - max_visible_lines
 
             self.message = ""
             self.draw_board()
@@ -285,11 +351,22 @@ class OthelloGUI:
         result_message = ""
         if winner == 1:
             result_message = "BLACK WINS!"
+            self.game.move_history.append("GAME OVER - BLACK WINS")
         elif winner == -1:
             result_message = "WHITE WINS!"
+            self.game.move_history.append("GAME OVER - WHITE WINS")
         else:
             result_message = "DRAW!"
+            self.game.move_history.append("GAME OVER - DRAW")
         
+        # 更新歷史記錄捲動位置
+        move_history = self.game.get_move_history()
+        visible_height = HEIGHT - 45
+        line_height = 20
+        max_visible_lines = visible_height // line_height
+        if len(move_history) > max_visible_lines:
+            self.history_scroll_position = len(move_history) - max_visible_lines
+    
         self.message = f"{result_message} - Press R to play again | Press Q to quit"
         self.draw_board()
         
@@ -302,9 +379,10 @@ class OthelloGUI:
                     sys.exit()
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_r:  # Restart game
-                        self.game = OthelloGame(player_mode=self.game.player_mode)
+                        self.game = OthelloGame(player_mode=self.game.player_mode, player_color=self.player_color)
                         self.message = ""
                         self.invalid_move_message = ""
+                        self.history_scroll_position = 0
                         return self.run_game(return_to_menu_callback)
                     elif event.key == pygame.K_q:  # Quit game
                         pygame.quit()
