@@ -25,9 +25,9 @@ def get_best_move(game, max_depth=8):  # 減少預設搜尋深度從8到4
     elif empty_count >= 50:
         max_depth = 4  # 開局階段，減少深度
     
-    # 如果是還棋模式，用更簡單的策略選擇還棋
+    # 如果是還棋模式，使用 Alpha-Beta 搜索尋找最佳還子位置
     if game.is_in_give_back_mode():
-        return optimized_give_back(game)
+        return get_best_give_back(game, max_depth=6)  # 使用較小深度提高效率
     
     # 設置搜尋的開始時間，用於超時控制
     start_time = time.time()
@@ -360,3 +360,51 @@ def late_game_evaluation(game):
     opponent_disks = sum(row.count(-game.current_player) for row in game.board)
     
     return player_disks - opponent_disks
+
+
+def get_best_give_back(game, max_depth=5):
+    """
+    使用 Alpha-Beta 剪枝搜索找出最佳(對自己最不利)的還子位置
+    
+    Parameters:
+        game (OthelloGame): 當前遊戲狀態
+        max_depth (int): 最大搜索深度
+        
+    Returns:
+        tuple: 最佳還子位置 (row, col)
+    """
+    give_back_options = game.get_give_back_options()
+    
+    # 如果只有一個選擇，直接返回
+    if len(give_back_options) <= 1:
+        return give_back_options[0]
+        
+    # 設置搜索起始時間
+    start_time = time.time()
+    
+    # 我們要尋找對當前玩家最不利的還子位置
+    # 因此這裡是找最小值，代表對當前玩家最差結果
+    best_score = float("inf")
+    best_position = give_back_options[0]
+    
+    for pos in give_back_options:
+        # 創建模擬遊戲狀態
+        temp_game = OthelloGame(player_mode=game.player_mode)
+        temp_game.board = [row[:] for row in game.board]
+        temp_game.current_player = game.current_player
+        
+        # 模擬還子
+        temp_game.board[pos[0]][pos[1]] = -temp_game.current_player
+        
+        # 切換玩家
+        temp_game.current_player *= -1
+        
+        # 評估這個還子選擇的結果
+        score, _ = alphabeta(temp_game, max_depth, True, float("-inf"), float("inf"), start_time, time_limit=20.0)
+        
+        # 如果得分更低(對當前玩家更不利)，則更新最佳選擇
+        if score < best_score:
+            best_score = score
+            best_position = pos
+    
+    return best_position

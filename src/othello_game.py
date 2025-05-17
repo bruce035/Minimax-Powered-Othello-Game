@@ -1,3 +1,5 @@
+import time
+
 class OthelloGame:
     def __init__(self, player_mode="friend", player_color=1):
         """
@@ -26,6 +28,9 @@ class OthelloGame:
         # 新增變數，記錄最後一步動作
         self.last_move = None
         self.last_give_back = None
+        # 新增變數，記錄每一步的執行時間
+        self.move_times = {1: [], -1: []}  # 分別記錄黑棋和白棋的執行時間
+        self.game_start_time = time.time()  # 記錄遊戲開始時間
 
     def is_valid_move(self, row, col):
         """
@@ -157,13 +162,14 @@ class OthelloGame:
                     
         return flipped
 
-    def make_move(self, row, col):
+    def make_move(self, row, col, execution_time=None):
         """
         Make a move at the given position for the current player if it's a valid move.
 
         Args:
             row (int): The row index of the move.
             col (int): The column index of the move.
+            execution_time (float, optional): The time taken to execute this move in seconds.
             
         Returns:
             bool: True if move was successful, False otherwise.
@@ -180,8 +186,15 @@ class OthelloGame:
             self.last_move = (row, col)
             self.last_give_back = None
             
-            # 記錄到遊戲歷史
-            move_record = f"{player_color}: {position}"
+            # 確保我們有執行時間
+            if execution_time is None:
+                execution_time = 0.0
+            
+            # 記錄到執行時間統計
+            self.move_times[self.current_player].append(execution_time)
+            
+            # 記錄到遊戲歷史，包含執行時間
+            move_record = f"{player_color}: {position} [{execution_time:.2f}s]"
             self.move_history.append(move_record)
             
             self.board[row][col] = self.current_player
@@ -198,13 +211,14 @@ class OthelloGame:
                 
         return False
 
-    def give_back_disk(self, row, col):
+    def give_back_disk(self, row, col, execution_time=None):
         """
         Give back a disk to the opponent from the recently flipped disks.
         
         Args:
             row (int): The row index of the disk to give back.
             col (int): The column index of the disk to give back.
+            execution_time (float, optional): The time taken to execute this move in seconds.
             
         Returns:
             bool: True if the disk was successfully given back, False otherwise.
@@ -217,8 +231,15 @@ class OthelloGame:
             # 紀錄返還的位置
             self.last_give_back = (row, col)
             
-            # 記錄到遊戲歷史
-            give_back_record = f"{player_color}: gave back at {position}"
+            # 確保我們有執行時間
+            if execution_time is None:
+                execution_time = 0.0
+                
+            # 記錄到執行時間統計
+            self.move_times[self.current_player].append(execution_time)
+            
+            # 記錄到遊戲歷史，包含執行時間
+            give_back_record = f"{player_color}: gave back at {position} [{execution_time:.2f}s]"
             self.move_history.append(give_back_record)
             
             # 將棋子還給對手
@@ -261,10 +282,13 @@ class OthelloGame:
         """
         return len(self.get_valid_moves()) > 0
 
-    def pass_turn(self):
+    def pass_turn(self, execution_time=None):
         """
         Pass the turn to the opponent when no valid moves are available.
         
+        Args:
+            execution_time (float, optional): The time taken to execute this move in seconds.
+    
         Returns:
             bool: True if the turn was passed, False if there are valid moves.
         """
@@ -274,8 +298,15 @@ class OthelloGame:
             
         player_color = "BLACK" if self.current_player == 1 else "WHITE"
         
-        # 記錄跳過回合到遊戲歷史
-        pass_record = f"{player_color}: pass turn"
+        # 確保我們有執行時間
+        if execution_time is None:
+            execution_time = 0.0
+            
+        # 記錄到執行時間統計
+        self.move_times[self.current_player].append(execution_time)
+        
+        # 記錄跳過回合到遊戲歷史，包含執行時間
+        pass_record = f"{player_color}: pass turn [{execution_time:.2f}s]"
         self.move_history.append(pass_record)
         
         # 記錄這一步為跳過
@@ -361,3 +392,28 @@ class OthelloGame:
             list: A list of strings describing all moves in the game.
         """
         return self.move_history
+
+    def get_time_statistics(self):
+        """
+        Get statistics about time usage in the game.
+        
+        Returns:
+            dict: A dictionary containing time statistics.
+        """
+        stats = {}
+        
+        # 計算總遊戲時間
+        total_time = time.time() - self.game_start_time
+        stats["total_game_time"] = total_time
+        
+        # 計算黑棋和白棋的總時間和平均時間
+        black_times = self.move_times[1]
+        white_times = self.move_times[-1]
+        
+        stats["black_total_time"] = sum(black_times) if black_times else 0
+        stats["white_total_time"] = sum(white_times) if white_times else 0
+        
+        stats["black_average_time"] = stats["black_total_time"] / len(black_times) if black_times else 0
+        stats["white_average_time"] = stats["white_total_time"] / len(white_times) if white_times else 0
+        
+        return stats

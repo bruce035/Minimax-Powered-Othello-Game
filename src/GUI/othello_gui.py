@@ -1,10 +1,11 @@
 import pygame
 import sys
+import time
 from othello_game import OthelloGame
 from ai_agent import get_best_move
 
 # Constants and colors
-WIDTH, HEIGHT = 680, 560  # 增加寬度，為記錄文字框留空間
+WIDTH, HEIGHT = 720, 560  # 增加寬度，為記錄文字框留空間
 BOARD_SIZE = 8
 SQUARE_SIZE = (HEIGHT - 80) // BOARD_SIZE
 BOARD_WIDTH = SQUARE_SIZE * BOARD_SIZE
@@ -38,6 +39,8 @@ class OthelloGUI:
         self.show_hints = True
         self.player_color = player_color
         self.history_scroll_position = 0  # 記錄區捲動位置
+        # 記錄當前玩家的思考開始時間，而不是點擊時間
+        self.player_turn_start_time = time.time()
 
     def initialize_pygame(self):
         """
@@ -237,10 +240,10 @@ class OthelloGUI:
                 x, y = event.pos
                 # 檢測滑鼠滾輪事件用於捲動歷史記錄
                 if event.button == 4:  # 滾輪向上
-                    self.history_scroll_position = max(0, self.history_scroll_position - 3)
+                    self.history_scroll_position = max(0, self.history_scroll_position - 1)
                     self.draw_board()
                 elif event.button == 5:  # 滾輪向下
-                    self.history_scroll_position += 3
+                    self.history_scroll_position += 1
                     self.draw_board()
                 else:  # 正常滑鼠點擊
                     # 只檢查棋盤區域的點擊
@@ -252,18 +255,27 @@ class OthelloGUI:
                         if 0 <= row < 8 and 0 <= col < 8:
                             if self.game.is_in_give_back_mode():
                                 # If in give back mode, try to give back a disk
-                                if self.game.give_back_disk(row, col):
+                                # 計算從上一次玩家回合開始到現在的時間
+                                execution_time = round(time.time() - self.player_turn_start_time, 2)
+                                if self.game.give_back_disk(row, col, execution_time):
                                     self.flip_sound.play()
                                     self.invalid_move_message = ""
+                                    # 對手回合開始，重置計時
+                                    self.player_turn_start_time = time.time()
                                 else:
                                     self.invalid_move_message = "Invalid selection. Choose a highlighted disk."
                                     self.invalid_play_sound.play()
                             else:
                                 # Normal move
                                 if self.game.is_valid_move(row, col):
-                                    self.game.make_move(row, col)
+                                    # 計算從上一次玩家回合開始到現在的時間
+                                    execution_time = round(time.time() - self.player_turn_start_time, 2)
+                                    self.game.make_move(row, col, execution_time)
                                     self.invalid_move_message = ""
                                     self.flip_sound.play()
+                                    # 如果不需要還棋，則重置計時器為對手回合開始
+                                    if not self.game.is_in_give_back_mode():
+                                        self.player_turn_start_time = time.time()
                                 else:
                                     self.invalid_move_message = "Invalid move! Try again."
                                     self.invalid_play_sound.play()
@@ -276,20 +288,25 @@ class OthelloGUI:
         if self.game.player_mode == "ai" and self.player_color == -1:
             self.message = "AI is thinking..."
             self.draw_board()
+            ai_start_time = time.time()
             ai_move = get_best_move(self.game)
+            execution_time = round(time.time() - ai_start_time, 2)
             pygame.time.delay(500)
-            self.game.make_move(*ai_move)
+            self.game.make_move(*ai_move, execution_time=execution_time)
             
             # If in give-back mode after AI move, automatically give back
             if self.game.is_in_give_back_mode():
                 self.message = "AI is giving back a disk..."
                 self.draw_board()
                 pygame.time.delay(500)
-                give_back_options = self.game.get_give_back_options()
-                give_back_pos = get_best_move(self.game)  # 使用 AI 選擇最佳的還棋位置
-                self.game.give_back_disk(*give_back_pos)
+                give_back_start_time = time.time()
+                give_back_pos = get_best_move(self.game)
+                give_back_time = round(time.time() - give_back_start_time, 2)
+                self.game.give_back_disk(*give_back_pos, execution_time=give_back_time)
             
             self.message = ""
+            # 重要：AI 下完後，開始計時玩家的回合
+            self.player_turn_start_time = time.time()
 
         while not self.game.is_game_over():
             # 處理玩家沒有有效移動的情況
@@ -297,8 +314,14 @@ class OthelloGUI:
                 player_name = "Black" if self.game.current_player == 1 else "White"
                 self.message = f"{player_name} has no valid moves. Pass turn."
                 self.draw_board()
+                pass_start_time = time.time()
                 pygame.time.delay(1000)
-                self.game.pass_turn()
+                pass_time = round(time.time() - pass_start_time, 2)
+                self.game.pass_turn(execution_time=pass_time)
+                # 如果跳過回合後，切換到了玩家的回合，重置計時器
+                if (self.game.current_player == self.player_color or 
+                    (self.game.player_mode == "friend")):
+                    self.player_turn_start_time = time.time()
                 continue
             
             self.handle_input()
@@ -309,14 +332,20 @@ class OthelloGUI:
                 if not self.game.has_valid_moves():
                     self.message = "AI has no valid moves. Pass turn."
                     self.draw_board()
+                    pass_start_time = time.time()
                     pygame.time.delay(1000)
-                    self.game.pass_turn()
+                    pass_time = round(time.time() - pass_start_time, 2)
+                    self.game.pass_turn(execution_time=pass_time)
+                    # AI 跳過回合，這時玩家回合開始
+                    self.player_turn_start_time = time.time()
                 else:
                     self.message = "AI is thinking..."
                     self.draw_board()
+                    ai_start_time = time.time()
                     ai_move = get_best_move(self.game)
+                    execution_time = round(time.time() - ai_start_time, 2)
                     pygame.time.delay(500)
-                    self.game.make_move(*ai_move)
+                    self.game.make_move(*ai_move, execution_time=execution_time)
                     
                     # 自動捲動歷史記錄到最新項目
                     move_history = self.game.get_move_history()
@@ -325,29 +354,37 @@ class OthelloGUI:
                     max_visible_lines = visible_height // line_height
                     if len(move_history) > max_visible_lines:
                         self.history_scroll_position = len(move_history) - max_visible_lines
-                
+            
                     # If in give-back mode after AI move, automatically give back
                     if self.game.is_in_give_back_mode():
                         self.message = "AI is giving back a disk..."
                         self.draw_board()
                         pygame.time.delay(500)
+                        give_back_start_time = time.time()
                         give_back_pos = get_best_move(self.game)
-                        self.game.give_back_disk(*give_back_pos)
+                        give_back_time = round(time.time() - give_back_start_time, 2)
+                        self.game.give_back_disk(*give_back_pos, execution_time=give_back_time)
                         
                         # 再次更新歷史記錄捲動位置
                         move_history = self.game.get_move_history()
                         if len(move_history) > max_visible_lines:
                             self.history_scroll_position = len(move_history) - max_visible_lines
+                
+                # AI 完成所有動作後，玩家回合開始
+                self.player_turn_start_time = time.time()
 
             self.message = ""
             self.draw_board()
 
         winner = self.game.get_winner()
         self.draw_board()
-        self.end_game_sound.play()  # Play end game sound effect
-        pygame.time.delay(1000)  # Display the result for 1 second
-        
-        # 遊戲結束時，分兩行顯示訊息，更加清晰
+        self.end_game_sound.play()
+        pygame.time.delay(1000)
+
+        # 獲取時間統計
+        time_stats = self.game.get_time_statistics()
+
+        # 遊戲結束，記錄結果和時間統計
         result_message = ""
         if winner == 1:
             result_message = "BLACK WINS!"
@@ -358,6 +395,13 @@ class OthelloGUI:
         else:
             result_message = "DRAW!"
             self.game.move_history.append("GAME OVER - DRAW")
+
+        # 添加時間統計到歷史記錄
+        self.game.move_history.append("")
+        self.game.move_history.append("TIME STATISTICS:")
+        self.game.move_history.append(f"Total game time: {time_stats['total_game_time']:.2f}s")
+        self.game.move_history.append(f"BLACK - Total: {time_stats['black_total_time']:.2f}s, Avg: {time_stats['black_average_time']:.2f}s")
+        self.game.move_history.append(f"WHITE - Total: {time_stats['white_total_time']:.2f}s, Avg: {time_stats['white_average_time']:.2f}s")
         
         # 更新歷史記錄捲動位置
         move_history = self.game.get_move_history()
